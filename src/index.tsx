@@ -935,7 +935,7 @@ function renderResult(d) {
     document.getElementById('bbStatus').textContent = price>lastBbU?'🔴 상단 돌파':price<lastBbL?'🟢 하단 이탈':'밴드 폭: '+(lastBbU-lastBbL).toFixed(0);
   }
   document.getElementById('stochVal').textContent = lastK?lastK.toFixed(1):'-';
-  document.getElementById('stochStatus').textContent = 'D: '+(lastD?lastD.toFixed(1):'-')+(lastK>80?' ⚠️ 과매수':lastK<20?' ✅ 과매도':'');
+  document.getElementById('stochStatus').textContent = 'D: '+(lastD?lastD.toFixed(1):'-')+(lastK>80?' \u26a0 과매수':lastK<20?' \u2705 과매도':'');
   [['sma5',lastSma5],['sma20',lastSma20],['sma60',lastSma60],['sma120',lastSma120]].forEach(([id,v])=>{
     document.getElementById(id).textContent = fmt(v,price>100?0:2);
     if(v){const diff=((price-v)/v*100).toFixed(2);document.getElementById(id+'diff').textContent=(diff>=0?'▲':'▼')+' '+Math.abs(diff)+'%';document.getElementById(id+'diff').className='text-xs mt-1 '+(diff>=0?'up':'down');}
@@ -1470,14 +1470,14 @@ async function loadDbStatus() {
 }
 
 async function runDbCleanup() {
-  const target = (document.getElementById('cleanupTarget') as any).value;
-  const period = parseInt((document.getElementById('cleanupPeriod') as any).value);
+  const target = document.getElementById('cleanupTarget').value;
+  const period = parseInt(document.getElementById('cleanupPeriod').value);
   const elResult = document.getElementById('cleanupResult');
   const targetLabel = { trade_history:'거래 내역', backtest_results:'백테스팅 결과', all:'전체' }[target] || target;
   const periodLabel = period === 0 ? '전체' : period + '개월 이전';
   const msg = period === 0
-    ? '⚠️ [' + targetLabel + '] 데이터를 전부 삭제합니다.\n정말 계속하시겠습니까?'
-    : '[' + targetLabel + '] 중 ' + periodLabel + ' 데이터를 삭제합니다.\n계속하시겠습니까?';
+    ? '[' + targetLabel + '] 데이터를 전부 삭제합니다. 정말 계속하시겠습니까?'
+    : '[' + targetLabel + '] 중 ' + periodLabel + ' 데이터를 삭제합니다. 계속하시겠습니까?';
   if (!confirm(msg)) return;
   elResult.classList.remove('hidden');
   elResult.textContent = '정리 중...';
@@ -1492,8 +1492,8 @@ async function runDbCleanup() {
     elResult.textContent = d.message;
     elResult.style.background = '#065f46'; elResult.style.color = '#34d399';
     setTimeout(loadDbStatus, 500);
-  } catch(e: any) {
-    elResult.textContent = '오류: ' + e.message;
+  } catch(e) {
+    elResult.textContent = '오류: ' + (e.message || e);
     elResult.style.background = '#7f1d1d'; elResult.style.color = '#f87171';
   }
 }
@@ -1510,8 +1510,8 @@ async function runVacuum() {
     elResult.textContent = d.message;
     elResult.style.background = '#065f46'; elResult.style.color = '#34d399';
     setTimeout(loadDbStatus, 500);
-  } catch(e: any) {
-    elResult.textContent = '오류: ' + e.message;
+  } catch(e) {
+    elResult.textContent = '오류: ' + (e.message || e);
     elResult.style.background = '#7f1d1d'; elResult.style.color = '#f87171';
   }
 }
