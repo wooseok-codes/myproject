@@ -1,12 +1,17 @@
 {
-  "name": "test",
+  "name": "myproject",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:sandbox": "wrangler pages dev dist --d1=myproject-production --local --ip 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "wrangler pages dev",
-    "deploy": "npm run build && wrangler pages deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "preview": "wrangler pages dev dist",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name myproject",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "db:create": "wrangler d1 create myproject-production",
+    "db:migrate:local": "wrangler d1 migrations apply myproject-production --local",
+    "db:migrate:prod": "wrangler d1 migrations apply myproject-production",
+    "db:console:local": "wrangler d1 execute myproject-production --local"
   },
   "dependencies": {
     "hono": "^4.12.7"
