@@ -795,7 +795,7 @@ function switchNav(name) {
   if (name === 'bot') loadBots();
   if (name === 'trades') loadTrades();
   if (name === 'backtest') loadBtHistory();
-  if (name === 'settings') loadSettings();
+  if (name === 'settings') { loadSettings(); loadDbStatus(); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -1385,6 +1385,135 @@ async function testSlack() {
     el.style.background = d.success ? '#065f46' : '#7f1d1d';
     el.style.color = d.success ? '#34d399' : '#f87171';
   } catch(e) { el.textContent = '오류: '+e.message; el.style.background='#7f1d1d'; el.style.color='#f87171'; }
+}
+
+// ══════════════════════════════════════════════════════
+// DB 현황 & 관리
+// ══════════════════════════════════════════════════════
+async function loadDbStatus() {
+  try {
+    const r = await fetch('/api/settings/db-status');
+    const d = await r.json();
+    if (d.error) { console.error(d.error); return; }
+
+    const { tables, totalEstimatedBytes, tradeRange, monthlyTrades } = d;
+
+    // ── 테이블 카드 렌더링 ──
+    const tableInfo = [
+      { key: 'bot_configs',      label: '봇 설정',    icon: 'fa-robot',     color: 'text-blue-400' },
+      { key: 'trade_history',    label: '거래 내역',  icon: 'fa-receipt',   color: 'text-green-400' },
+      { key: 'backtest_results', label: '백테스팅',   icon: 'fa-chart-line', color: 'text-purple-400' },
+      { key: 'api_settings',     label: 'API 설정',   icon: 'fa-key',       color: 'text-yellow-400' },
+    ];
+    const cardsEl = document.getElementById('dbTableCards');
+    if (cardsEl) {
+      cardsEl.innerHTML = tableInfo.map(({ key, label, icon, color }) => {
+        const info = tables[key] || { count: 0, estimatedBytes: 0 };
+        const sizeStr = info.estimatedBytes >= 1024*1024
+          ? (info.estimatedBytes / (1024*1024)).toFixed(1) + ' MB'
+          : info.estimatedBytes >= 1024
+            ? (info.estimatedBytes / 1024).toFixed(1) + ' KB'
+            : info.estimatedBytes + ' B';
+        return '<div class="card-dark p-4 text-center">' +
+          '<i class="fas ' + icon + ' ' + color + ' text-lg mb-2 block"></i>' +
+          '<div class="text-xs text-gray-400 mb-1">' + label + '</div>' +
+          '<div class="text-2xl font-bold text-white">' + info.count + '</div>' +
+          '<div class="text-xs text-gray-600 mt-1">~' + sizeStr + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    // ── 전체 용량 바 ──
+    const maxBytes = 100 * 1024 * 1024;
+    const pct = Math.min((totalEstimatedBytes / maxBytes) * 100, 100);
+    const totalSizeStr = totalEstimatedBytes >= 1024*1024
+      ? (totalEstimatedBytes / (1024*1024)).toFixed(2) + ' MB'
+      : (totalEstimatedBytes / 1024).toFixed(1) + ' KB';
+    const elTotalSize = document.getElementById('dbTotalSize');
+    const elSizeBar = document.getElementById('dbSizeBar');
+    const elRangeText = document.getElementById('dbRangeText');
+    if (elTotalSize) elTotalSize.textContent = totalSizeStr;
+    if (elSizeBar) elSizeBar.style.width = pct.toFixed(1) + '%';
+    if (elRangeText) {
+      const oldest = tradeRange?.oldest ? tradeRange.oldest.slice(0,10) : '-';
+      const newest = tradeRange?.newest ? tradeRange.newest.slice(0,10) : '-';
+      elRangeText.textContent = tables.trade_history?.count > 0
+        ? '거래 기간: ' + oldest + ' ~ ' + newest
+        : '거래 내역 없음';
+    }
+
+    // ── 월별 거래 현황 ──
+    const elMonthly = document.getElementById('dbMonthlyChart');
+    if (elMonthly) {
+      if (!monthlyTrades || monthlyTrades.length === 0) {
+        elMonthly.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">최근 6개월 거래 내역 없음</p>';
+      } else {
+        const maxCount = Math.max(...monthlyTrades.map(m => m.count), 1);
+        elMonthly.innerHTML = monthlyTrades.map(m => {
+          const pnlStr = m.total_pnl >= 0
+            ? '+' + Math.round(m.total_pnl).toLocaleString('ko-KR') + '원'
+            : Math.round(m.total_pnl).toLocaleString('ko-KR') + '원';
+          const pnlColor = m.total_pnl >= 0 ? 'text-green-400' : 'text-red-400';
+          const barW = Math.round((m.count / maxCount) * 100);
+          return '<div class="flex items-center gap-3 text-xs">' +
+            '<span class="text-gray-400 w-16 flex-shrink-0">' + m.month + '</span>' +
+            '<div class="flex-1 bg-gray-800 rounded-full h-2">' +
+              '<div class="h-2 rounded-full" style="width:' + barW + '%;background:linear-gradient(90deg,#6366f1,#8b5cf6);"></div>' +
+            '</div>' +
+            '<span class="text-gray-300 w-10 text-right flex-shrink-0">' + m.count + '건</span>' +
+            '<span class="' + pnlColor + ' w-28 text-right flex-shrink-0">' + pnlStr + '</span>' +
+            '</div>';
+        }).join('');
+      }
+    }
+  } catch(e) { console.error('DB 현황 로드 실패:', e); }
+}
+
+async function runDbCleanup() {
+  const target = (document.getElementById('cleanupTarget') as any).value;
+  const period = parseInt((document.getElementById('cleanupPeriod') as any).value);
+  const elResult = document.getElementById('cleanupResult');
+  const targetLabel = { trade_history:'거래 내역', backtest_results:'백테스팅 결과', all:'전체' }[target] || target;
+  const periodLabel = period === 0 ? '전체' : period + '개월 이전';
+  const msg = period === 0
+    ? '⚠️ [' + targetLabel + '] 데이터를 전부 삭제합니다.\n정말 계속하시겠습니까?'
+    : '[' + targetLabel + '] 중 ' + periodLabel + ' 데이터를 삭제합니다.\n계속하시겠습니까?';
+  if (!confirm(msg)) return;
+  elResult.classList.remove('hidden');
+  elResult.textContent = '정리 중...';
+  elResult.style.background = '#1f2937'; elResult.style.color = '#9ca3af';
+  try {
+    const r = await fetch('/api/settings/db-cleanup', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ target, period })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    elResult.textContent = d.message;
+    elResult.style.background = '#065f46'; elResult.style.color = '#34d399';
+    setTimeout(loadDbStatus, 500);
+  } catch(e: any) {
+    elResult.textContent = '오류: ' + e.message;
+    elResult.style.background = '#7f1d1d'; elResult.style.color = '#f87171';
+  }
+}
+
+async function runVacuum() {
+  const elResult = document.getElementById('cleanupResult');
+  elResult.classList.remove('hidden');
+  elResult.textContent = 'DB 최적화 중...';
+  elResult.style.background = '#1f2937'; elResult.style.color = '#9ca3af';
+  try {
+    const r = await fetch('/api/settings/db-vacuum', { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    elResult.textContent = d.message;
+    elResult.style.background = '#065f46'; elResult.style.color = '#34d399';
+    setTimeout(loadDbStatus, 500);
+  } catch(e: any) {
+    elResult.textContent = '오류: ' + e.message;
+    elResult.style.background = '#7f1d1d'; elResult.style.color = '#f87171';
+  }
 }
 
 // 초기 로드

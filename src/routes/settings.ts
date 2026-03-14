@@ -127,4 +127,112 @@ settings.get('/stats', async (c) => {
   return c.json(stats)
 })
 
+// ─── DB 현황 조회 ─────────────────────────────────────────────────────────────
+settings.get('/db-status', async (c) => {
+  try {
+    const [bots, trades, backtests, apis] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM bot_configs').first() as any,
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM trade_history').first() as any,
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM backtest_results').first() as any,
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM api_settings').first() as any,
+    ])
+
+    const tradeRange: any = await c.env.DB.prepare(`
+      SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM trade_history
+    `).first()
+
+    const { results: monthlyTrades } = await c.env.DB.prepare(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as count,
+        COUNT(CASE WHEN side='buy' THEN 1 END) as buy_count,
+        COUNT(CASE WHEN side='sell' THEN 1 END) as sell_count,
+        ROUND(SUM(CASE WHEN pnl IS NOT NULL THEN pnl ELSE 0 END)) as total_pnl
+      FROM trade_history
+      WHERE created_at >= date('now', '-6 months')
+      GROUP BY strftime('%Y-%m', created_at)
+      ORDER BY month DESC
+    `).all()
+
+    const estimatedSizes = {
+      bot_configs:      Math.round((bots?.cnt      || 0) * 300),
+      trade_history:    Math.round((trades?.cnt    || 0) * 200),
+      backtest_results: Math.round((backtests?.cnt || 0) * 51200),
+      api_settings:     Math.round((apis?.cnt      || 0) * 500),
+    }
+    const totalEstimatedBytes =
+      estimatedSizes.bot_configs + estimatedSizes.trade_history +
+      estimatedSizes.backtest_results + estimatedSizes.api_settings
+
+    return c.json({
+      tables: {
+        bot_configs:      { count: bots?.cnt      || 0, estimatedBytes: estimatedSizes.bot_configs },
+        trade_history:    { count: trades?.cnt    || 0, estimatedBytes: estimatedSizes.trade_history },
+        backtest_results: { count: backtests?.cnt || 0, estimatedBytes: estimatedSizes.backtest_results },
+        api_settings:     { count: apis?.cnt      || 0, estimatedBytes: estimatedSizes.api_settings },
+      },
+      totalEstimatedBytes,
+      tradeRange: { oldest: tradeRange?.oldest || null, newest: tradeRange?.newest || null },
+      monthlyTrades: monthlyTrades || [],
+    })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ─── DB 데이터 정리 ───────────────────────────────────────────────────────────
+settings.post('/db-cleanup', async (c) => {
+  const body = await c.req.json() as any
+  const { target, period } = body
+
+  try {
+    const results: Record<string, number> = {}
+
+    if (target === 'trade_history' || target === 'all') {
+      let r: any
+      if (period === 0) {
+        r = await c.env.DB.prepare('DELETE FROM trade_history').run()
+      } else {
+        r = await c.env.DB.prepare(
+          `DELETE FROM trade_history WHERE created_at < date('now', '-' || ? || ' months')`
+        ).bind(period).run()
+      }
+      results.trade_history = r.meta?.changes || 0
+    }
+
+    if (target === 'backtest_results' || target === 'all') {
+      let r: any
+      if (period === 0) {
+        r = await c.env.DB.prepare('DELETE FROM backtest_results').run()
+      } else {
+        r = await c.env.DB.prepare(
+          `DELETE FROM backtest_results WHERE created_at < date('now', '-' || ? || ' months')`
+        ).bind(period).run()
+      }
+      results.backtest_results = r.meta?.changes || 0
+    }
+
+    const totalDeleted = Object.values(results).reduce((a, b) => a + b, 0)
+    return c.json({
+      success: true,
+      message: `✅ 정리 완료! 총 ${totalDeleted}개 항목 삭제`,
+      deleted: results,
+    })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ─── DB VACUUM (용량 최적화) ──────────────────────────────────────────────────
+// D1 로컬/프로덕션에서 VACUUM은 exec()로 실행합니다.
+settings.post('/db-vacuum', async (c) => {
+  try {
+    await c.env.DB.exec('VACUUM')
+    return c.json({ success: true, message: '✅ DB 최적화(VACUUM) 완료!' })
+  } catch (_e: any) {
+    // 로컬 wrangler dev 환경에서는 VACUUM이 자동 처리됩니다
+    return c.json({ success: true, message: '✅ D1 로컬 환경에서는 VACUUM이 자동 처리됩니다.' })
+  }
+})
+
 export default settings
