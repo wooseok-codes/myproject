@@ -706,6 +706,99 @@ function mainPageHTML(): string {
         </a>
       </div>
     </div>
+
+    <!-- ══ DB 현황 & 용량 관리 ══ -->
+    <div class="card p-6 lg:col-span-2">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="font-semibold text-white flex items-center gap-2">
+          <i class="fas fa-database text-indigo-400"></i> DB 현황 &amp; 용량 관리
+        </h3>
+        <button onclick="loadDbStatus()" class="text-xs px-3 py-1.5 rounded-lg text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 transition-all flex items-center gap-1">
+          <i class="fas fa-rotate-right"></i> 새로고침
+        </button>
+      </div>
+
+      <!-- 테이블 현황 카드 4개 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6" id="dbTableCards">
+        <div class="card-dark p-4 text-center animate-pulse"><div class="w-16 h-3 bg-gray-700 rounded mx-auto mb-2"></div><div class="w-8 h-6 bg-gray-700 rounded mx-auto"></div></div>
+        <div class="card-dark p-4 text-center animate-pulse"><div class="w-16 h-3 bg-gray-700 rounded mx-auto mb-2"></div><div class="w-8 h-6 bg-gray-700 rounded mx-auto"></div></div>
+        <div class="card-dark p-4 text-center animate-pulse"><div class="w-16 h-3 bg-gray-700 rounded mx-auto mb-2"></div><div class="w-8 h-6 bg-gray-700 rounded mx-auto"></div></div>
+        <div class="card-dark p-4 text-center animate-pulse"><div class="w-16 h-3 bg-gray-700 rounded mx-auto mb-2"></div><div class="w-8 h-6 bg-gray-700 rounded mx-auto"></div></div>
+      </div>
+
+      <!-- 전체 용량 프로그레스 -->
+      <div class="mb-6 p-4 rounded-xl" style="background:#0d111e;border:1px solid #1a2030;">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-gray-400">전체 예상 용량</span>
+          <span id="dbTotalSize" class="text-sm font-semibold text-white">로딩 중...</span>
+        </div>
+        <div class="w-full bg-gray-800 rounded-full h-2 mb-2">
+          <div id="dbSizeBar" class="h-2 rounded-full transition-all" style="width:0%;background:linear-gradient(90deg,#6366f1,#8b5cf6);"></div>
+        </div>
+        <div class="flex items-center justify-between text-xs text-gray-600">
+          <span>0 KB</span>
+          <span id="dbRangeText" class="text-gray-500 text-center">-</span>
+          <span>100 MB (권장 상한)</span>
+        </div>
+      </div>
+
+      <!-- 월별 거래 현황 -->
+      <div class="mb-6">
+        <h4 class="text-sm font-semibold text-gray-300 mb-3">월별 거래 현황 (최근 6개월)</h4>
+        <div id="dbMonthlyChart" class="space-y-2">
+          <p class="text-xs text-gray-500 text-center py-4">로딩 중...</p>
+        </div>
+      </div>
+
+      <!-- 데이터 정리 도구 -->
+      <div class="p-4 rounded-xl" style="background:#0d111e;border:1px solid #1a2030;">
+        <h4 class="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+          <i class="fas fa-broom text-yellow-400"></i> 데이터 정리 도구
+        </h4>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label class="text-xs text-gray-400 mb-1 block">정리 대상</label>
+            <select id="cleanupTarget" class="text-sm w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white">
+              <option value="trade_history">거래 내역만</option>
+              <option value="backtest_results">백테스팅 결과만</option>
+              <option value="all">전체 (거래 + 백테스팅)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-400 mb-1 block">기간 설정</label>
+            <select id="cleanupPeriod" class="text-sm w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white">
+              <option value="1">1개월 이전 데이터 삭제</option>
+              <option value="3">3개월 이전 데이터 삭제</option>
+              <option value="6" selected>6개월 이전 데이터 삭제</option>
+              <option value="12">12개월 이전 데이터 삭제</option>
+              <option value="0">전체 삭제 (주의)</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button onclick="runDbCleanup()" class="w-full text-sm py-2 px-4 rounded-lg font-medium bg-yellow-600 hover:bg-yellow-500 text-white transition-all flex items-center justify-center gap-2">
+              <i class="fas fa-trash-can"></i> 정리 실행
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 pt-3 border-t border-gray-800">
+          <button onclick="runVacuum()" class="text-xs px-4 py-2 rounded-lg text-indigo-400 border border-indigo-800 hover:border-indigo-500 transition-all flex items-center gap-2">
+            <i class="fas fa-compress-arrows-alt"></i> DB 최적화 (VACUUM)
+          </button>
+          <span class="text-xs text-gray-600">삭제 후 실제 파일 크기를 줄입니다</span>
+        </div>
+        <div id="cleanupResult" class="hidden mt-3 text-xs p-3 rounded-lg"></div>
+      </div>
+
+      <!-- 백업 안내 -->
+      <div class="mt-4 p-3 rounded-lg text-xs text-gray-500" style="background:#0d111e;border:1px solid #1a2030;">
+        <p class="font-semibold text-gray-400 mb-2">DB 백업 방법 (WSL 기준)</p>
+        <code class="block p-2 rounded text-green-400 text-xs" style="background:#0a0d1a;">
+          cp .wrangler/state/v3/d1/miniflare-*/*.sqlite ~/stockbot_backup_$(date +%Y%m%d).sqlite
+        </code>
+        <p class="mt-2">WSL 터미널에서 실행하면 홈 디렉터리에 백업 파일이 생성됩니다.</p>
+      </div>
+    </div>
+
   </div>
 </div>
 
