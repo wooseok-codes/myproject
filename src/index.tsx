@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import botRoutes from './routes/bot'
 import backtestRoutes from './routes/backtest'
 import settingsRoutes from './routes/settings'
+import recommendRoutes from './routes/recommend'
 
 type Bindings = {
   DB: D1Database
@@ -172,6 +173,7 @@ app.get('/api/analyze/:symbol', async (c) => {
 app.route('/api/bots', botRoutes)
 app.route('/api/backtest', backtestRoutes)
 app.route('/api/settings', settingsRoutes)
+app.route('/api/recommend', recommendRoutes)
 
 // ─── DB 초기화 엔드포인트 ─────────────────────────────────────────────────────
 app.post('/api/db/init', async (c) => {
@@ -213,11 +215,17 @@ app.post('/api/db/init', async (c) => {
         account_no TEXT, webhook_url TEXT, enabled INTEGER NOT NULL DEFAULT 0,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`,
+      `CREATE TABLE IF NOT EXISTS recommend_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        results_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
     ]
     for (const sql of sqls) {
       await c.env.DB.prepare(sql).run()
     }
-    return c.json({ message: '✅ DB 초기화 완료 (4개 테이블 생성)' })
+    return c.json({ message: '✅ DB 초기화 완료 (5개 테이블 생성)' })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
@@ -325,6 +333,9 @@ function mainPageHTML(): string {
     </button>
     <button onclick="switchNav('settings')" id="nav-settings" class="nav-tab px-5 py-3.5 text-sm font-medium text-gray-400 flex items-center gap-2">
       <i class="fas fa-gear"></i> API 설정
+    </button>
+    <button onclick="switchNav('recommend')" id="nav-recommend" class="nav-tab px-5 py-3.5 text-sm font-medium text-gray-400 flex items-center gap-2">
+      <i class="fas fa-star"></i> 종목 추천
     </button>
   </nav>
 </div>
@@ -615,6 +626,99 @@ function mainPageHTML(): string {
 </div>
 
 <!-- ════════ TAB 5: API 설정 ════════ -->
+<!-- ════════ TAB 6: 종목 추천 ════════ -->
+<div id="tab-recommend" class="tab-section">
+  <!-- 헤더 -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+    <div>
+      <h2 class="text-xl font-bold text-white flex items-center gap-2">
+        <i class="fas fa-star text-yellow-400"></i> AI 종목 추천
+      </h2>
+      <p class="text-xs text-gray-500 mt-1">기술적 지표 + 거래량 + 재무데이터 + 모멘텀 종합 분석</p>
+    </div>
+    <!-- 컨트롤 -->
+    <div class="flex flex-wrap items-center gap-2">
+      <select id="recMarket" class="text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white">
+        <option value="all">전체 (국내+미국)</option>
+        <option value="korea">국내만 (KOSPI)</option>
+        <option value="us">미국만 (S&P500)</option>
+      </select>
+      <button onclick="loadRecommend('short')" id="btnShort"
+        class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"
+        style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;">
+        <i class="fas fa-bolt"></i> 단기 추천
+      </button>
+      <button onclick="loadRecommend('long')" id="btnLong"
+        class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"
+        style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;">
+        <i class="fas fa-seedling"></i> 장기 추천
+      </button>
+    </div>
+  </div>
+
+  <!-- 투자 유형 설명 카드 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="card p-4 border-l-4" style="border-color:#f59e0b;">
+      <div class="flex items-center gap-2 mb-2">
+        <i class="fas fa-bolt text-yellow-400"></i>
+        <span class="font-semibold text-white">단기 투자</span>
+        <span class="text-xs text-yellow-400 bg-yellow-900 px-2 py-0.5 rounded-full">1개월 ~ 6개월</span>
+      </div>
+      <div class="text-xs text-gray-400 space-y-1">
+        <p>RSI 과매도 구간 포착 (20점)</p>
+        <p>MACD 골든크로스 신호 (20점)</p>
+        <p>거래량 급증 + 상승 모멘텀 (20점)</p>
+        <p>단기 가격 모멘텀 5일/20일 (20점)</p>
+        <p>볼린저밴드 하단 반등 (10점)</p>
+        <p>이동평균 정배열 여부 (10점)</p>
+      </div>
+    </div>
+    <div class="card p-4 border-l-4" style="border-color:#10b981;">
+      <div class="flex items-center gap-2 mb-2">
+        <i class="fas fa-seedling text-green-400"></i>
+        <span class="font-semibold text-white">장기 투자</span>
+        <span class="text-xs text-green-400 bg-green-900 px-2 py-0.5 rounded-full">1년 ~ 5년+</span>
+      </div>
+      <div class="text-xs text-gray-400 space-y-1">
+        <p>ROE + 부채비율 + 영업이익률 (40점)</p>
+        <p>매출 성장률 + 이익 성장률 (25점)</p>
+        <p>장기 이동평균 + 6개월 모멘텀 (20점)</p>
+        <p>PER + PBR 밸류에이션 (15점)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 현재 분석 유형 표시 -->
+  <div id="recTypeLabel" class="hidden mb-4 p-3 rounded-lg text-sm font-medium" style="background:#1a2030;border:1px solid #2a3040;"></div>
+
+  <!-- 로딩 -->
+  <div id="recLoading" class="hidden text-center py-16">
+    <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+    <p class="text-gray-400 text-sm" id="recLoadingText">종목 분석 중... (45개 종목 순차 분석, 약 30~60초 소요)</p>
+    <div class="mt-4 w-64 mx-auto bg-gray-800 rounded-full h-2">
+      <div id="recProgressBar" class="h-2 rounded-full transition-all" style="width:0%;background:linear-gradient(90deg,#6366f1,#8b5cf6);"></div>
+    </div>
+  </div>
+
+  <!-- 에러 -->
+  <div id="recError" class="hidden p-4 rounded-lg text-red-400 text-sm" style="background:#1a0505;border:1px solid #7f1d1d;"></div>
+
+  <!-- 결과 요약 -->
+  <div id="recSummary" class="hidden mb-4 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+  </div>
+
+  <!-- 추천 종목 카드 리스트 -->
+  <div id="recList" class="space-y-4"></div>
+
+  <!-- 추천 기록 -->
+  <div class="mt-8">
+    <h3 class="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
+      <i class="fas fa-clock-rotate-left"></i> 최근 추천 기록
+    </h3>
+    <div id="recHistory" class="text-xs text-gray-500 text-center py-4">추천 실행 후 기록이 표시됩니다</div>
+  </div>
+</div>
+
 <div id="tab-settings" class="tab-section">
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <!-- 모의계좌 설정 -->
@@ -889,6 +993,7 @@ function switchNav(name) {
   if (name === 'trades') loadTrades();
   if (name === 'backtest') loadBtHistory();
   if (name === 'settings') { loadSettings(); loadDbStatus(); }
+  if (name === 'recommend') { loadRecHistory(); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -1607,6 +1712,246 @@ async function runVacuum() {
     elResult.textContent = '오류: ' + (e.message || e);
     elResult.style.background = '#7f1d1d'; elResult.style.color = '#f87171';
   }
+}
+
+// ══════════════════════════════════════════════════════
+// 종목 추천
+// ══════════════════════════════════════════════════════
+let recCurrentType = '';
+
+async function loadRecommend(type) {
+  recCurrentType = type;
+  const market = document.getElementById('recMarket').value;
+  const elLoading  = document.getElementById('recLoading');
+  const elError    = document.getElementById('recError');
+  const elList     = document.getElementById('recList');
+  const elSummary  = document.getElementById('recSummary');
+  const elLabel    = document.getElementById('recTypeLabel');
+  const elProgress = document.getElementById('recProgressBar');
+
+  // 상태 초기화
+  elLoading.classList.remove('hidden');
+  elError.classList.add('hidden');
+  elList.innerHTML = '';
+  elSummary.classList.add('hidden');
+  elLabel.classList.add('hidden');
+  elProgress.style.width = '0%';
+
+  // 프로그레스 애니메이션
+  let prog = 0;
+  const timer = setInterval(() => {
+    prog = Math.min(prog + Math.random() * 4, 90);
+    elProgress.style.width = prog + '%';
+  }, 800);
+
+  try {
+    const res = await fetch('/api/recommend/' + type + '?market=' + market + '&limit=10');
+    clearInterval(timer);
+    elProgress.style.width = '100%';
+    setTimeout(() => elLoading.classList.add('hidden'), 400);
+
+    if (!res.ok) throw new Error('서버 오류 ' + res.status);
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+
+    // 유형 라벨
+    const isShort = type === 'short';
+    elLabel.classList.remove('hidden');
+    elLabel.innerHTML =
+      '<i class="fas ' + (isShort ? 'fa-bolt text-yellow-400' : 'fa-seedling text-green-400') + ' mr-2"></i>' +
+      '<span class="text-white font-semibold">' + d.label + '</span>' +
+      '<span class="ml-2 text-gray-400">' + d.description + '</span>';
+
+    // 요약
+    elSummary.classList.remove('hidden');
+    elSummary.innerHTML =
+      '<span class="px-2 py-1 rounded bg-gray-800">' + d.scanned + '개 종목 분석</span>' +
+      '<span class="px-2 py-1 rounded bg-gray-800">' + d.count + '개 추천</span>' +
+      '<span class="px-2 py-1 rounded bg-gray-800">시장: ' + { all:'전체', korea:'국내', us:'미국' }[market] + '</span>' +
+      '<span class="px-2 py-1 rounded bg-gray-800">업데이트: ' + new Date(d.updatedAt).toLocaleTimeString('ko-KR') + '</span>';
+
+    // 종목 카드 렌더링
+    if (!d.stocks || !d.stocks.length) {
+      elList.innerHTML = '<p class="text-center text-gray-500 py-8">추천 종목이 없습니다. 다른 시장을 선택해보세요.</p>';
+      return;
+    }
+
+    elList.innerHTML = d.stocks.map(function(s, i) {
+      const gradeMap = { S:'S등급 (최우선)', A:'A등급 (강력추천)', B:'B등급 (추천)', C:'C등급 (관심)' };
+      const priceStr = s.currency === 'KRW'
+        ? Math.round(s.currentPrice).toLocaleString('ko-KR') + '원'
+        : '$' + s.currentPrice.toFixed(2);
+
+      // 점수 바 HTML
+      const scoreBar = function(label, score, max, color) {
+        const pct = Math.round((score / max) * 100);
+        return '<div class="flex items-center gap-2 text-xs">' +
+          '<span class="text-gray-500 w-20 flex-shrink-0">' + label + '</span>' +
+          '<div class="flex-1 bg-gray-800 rounded-full h-1.5">' +
+            '<div class="h-1.5 rounded-full" style="width:' + pct + '%;background:' + color + ';"></div>' +
+          '</div>' +
+          '<span class="text-gray-400 w-8 text-right">' + score + '</span>' +
+        '</div>';
+      };
+
+      // 세부 점수 바
+      let detailBars = '';
+      if (isShort && s.details) {
+        detailBars =
+          scoreBar('RSI', s.details.rsiScore, 20, '#f59e0b') +
+          scoreBar('MACD', s.details.macdScore, 20, '#6366f1') +
+          scoreBar('거래량', s.details.volumeScore, 20, '#10b981') +
+          scoreBar('모멘텀', s.details.momentumScore, 20, '#8b5cf6') +
+          scoreBar('볼린저', s.details.bbScore, 10, '#f97316') +
+          scoreBar('정배열', s.details.positionScore, 10, '#06b6d4');
+      } else if (!isShort && s.details) {
+        detailBars =
+          scoreBar('재무건전성', s.details.financialScore, 40, '#10b981') +
+          scoreBar('성장성', s.details.growthScore, 25, '#6366f1') +
+          scoreBar('안정성', s.details.stabilityScore, 20, '#f59e0b') +
+          scoreBar('밸류에이션', s.details.valuationScore, 15, '#f97316');
+      }
+
+      // 모멘텀 태그
+      const momTags = s.momentum ? [
+        { label: '5일', val: s.momentum.d5 },
+        { label: '20일', val: s.momentum.d20 },
+        { label: '60일', val: s.momentum.d60 },
+      ].map(function(m) {
+        const color = m.val > 0 ? '#10b981' : '#ef4444';
+        const sign  = m.val > 0 ? '+' : '';
+        return '<span class="px-2 py-0.5 rounded text-xs font-medium" style="background:' + (m.val>0?'#052e16':'#450a0a') + ';color:' + color + ';">' +
+          m.label + ' ' + sign + m.val.toFixed(1) + '%</span>';
+      }).join('') : '';
+
+      // 52주 위치
+      const pos52w = s.position52w ? Math.round(s.position52w.position * 100) : 50;
+      const from52h = s.position52w ? s.position52w.fromHigh.toFixed(1) : '0';
+      const from52l = s.position52w ? s.position52w.fromLow.toFixed(1) : '0';
+
+      // 긍정 이유
+      const reasonsHtml = (s.reasons || []).slice(0, 4).map(function(r) {
+        return '<li class="flex items-start gap-1"><span class="text-green-400 flex-shrink-0">+</span><span>' + r + '</span></li>';
+      }).join('');
+
+      // 위험 요소
+      const risksHtml = (s.risks || []).slice(0, 2).map(function(r) {
+        return '<li class="flex items-start gap-1"><span class="text-red-400 flex-shrink-0">!</span><span>' + r + '</span></li>';
+      }).join('');
+
+      // 재무 데이터 (장기만)
+      let finHtml = '';
+      if (!isShort && s.financials) {
+        const fin = s.financials;
+        const fi = function(label, val, unit) {
+          if (val === null || val === undefined) return '';
+          return '<div class="text-center"><div class="text-xs text-gray-500">' + label + '</div>' +
+            '<div class="text-sm font-semibold text-white">' + (typeof val === 'number' ? val.toFixed(1) : val) + (unit||'') + '</div></div>';
+        };
+        finHtml = '<div class="mt-3 pt-3 border-t border-gray-800">' +
+          '<div class="text-xs text-gray-500 mb-2">재무 지표</div>' +
+          '<div class="grid grid-cols-4 gap-2">' +
+            fi('PER', fin.per, 'x') +
+            fi('PBR', fin.pbr, 'x') +
+            fi('ROE', fin.roe, '%') +
+            fi('부채비율', fin.debtRatio, '%') +
+          '</div></div>';
+      }
+
+      const rankColor = i === 0 ? '#f59e0b' : i === 1 ? '#9ca3af' : i === 2 ? '#b45309' : '#374151';
+
+      return '<div class="card p-5 transition-all hover:border-indigo-700" style="border:1px solid #1a2030;">' +
+        '<div class="flex flex-col md:flex-row md:items-start gap-4">' +
+
+          // 왼쪽: 순위 + 점수
+          '<div class="flex items-center gap-4 md:flex-col md:items-center md:w-24 flex-shrink-0">' +
+            '<div class="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold" style="background:' + rankColor + ';color:#fff;">' + (i+1) + '</div>' +
+            '<div class="text-center">' +
+              '<div class="text-3xl font-black" style="color:' + s.gradeColor + ';">' + s.score + '</div>' +
+              '<div class="text-xs font-bold px-2 py-0.5 rounded" style="background:' + s.gradeColor + '22;color:' + s.gradeColor + ';">' + (gradeMap[s.grade]||s.grade) + '</div>' +
+            '</div>' +
+          '</div>' +
+
+          // 오른쪽: 종목 정보
+          '<div class="flex-1 min-w-0">' +
+            '<div class="flex flex-wrap items-center gap-2 mb-2">' +
+              '<span class="text-white font-bold text-lg">' + s.name + '</span>' +
+              '<span class="text-gray-500 text-sm">' + s.symbol + '</span>' +
+              '<span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400">' + s.sector + '</span>' +
+              '<span class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400">' + s.market + '</span>' +
+            '</div>' +
+
+            '<div class="flex flex-wrap items-center gap-4 mb-3">' +
+              '<span class="text-xl font-bold text-white">' + priceStr + '</span>' +
+              '<div class="flex gap-1">' + momTags + '</div>' +
+            '</div>' +
+
+            // 52주 위치 바
+            '<div class="mb-3">' +
+              '<div class="flex justify-between text-xs text-gray-600 mb-1">' +
+                '<span>52주 저점 +' + from52l + '%</span>' +
+                '<span>52주 위치 ' + pos52w + '%</span>' +
+                '<span>52주 고점 ' + from52h + '%</span>' +
+              '</div>' +
+              '<div class="w-full bg-gray-800 rounded-full h-1.5 relative">' +
+                '<div class="h-1.5 rounded-full" style="width:' + pos52w + '%;background:linear-gradient(90deg,#10b981,#6366f1,#ef4444);"></div>' +
+              '</div>' +
+            '</div>' +
+
+            // 세부 점수
+            '<div class="space-y-1 mb-3">' + detailBars + '</div>' +
+
+            // 재무 (장기)
+            finHtml +
+
+            // 이유 + 위험
+            '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">' +
+              (reasonsHtml ? '<div><div class="text-xs font-semibold text-green-400 mb-1">긍정 요인</div><ul class="text-xs text-gray-400 space-y-0.5">' + reasonsHtml + '</ul></div>' : '') +
+              (risksHtml   ? '<div><div class="text-xs font-semibold text-red-400 mb-1">위험 요인</div><ul class="text-xs text-gray-400 space-y-0.5">' + risksHtml + '</ul></div>' : '') +
+            '</div>' +
+
+            // 분석 버튼
+            '<div class="mt-3 pt-3 border-t border-gray-800">' +
+              '<button onclick="selectStock(&quot;' + s.symbol + '&quot;)" class="text-xs px-3 py-1.5 rounded-lg text-indigo-400 border border-indigo-800 hover:border-indigo-500 transition-all flex items-center gap-1">' +
+                '<i class="fas fa-chart-line"></i> 상세 차트 분석 보기' +
+              '</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    // 추천 기록 갱신
+    loadRecHistory();
+
+  } catch(e) {
+    clearInterval(timer);
+    elLoading.classList.add('hidden');
+    elError.classList.remove('hidden');
+    elError.innerHTML = '<i class="fas fa-exclamation-circle mr-2"></i>오류: ' + e.message + '<br><span class="text-xs text-gray-500">야후 파이낸스 연결 문제일 수 있습니다. 잠시 후 다시 시도해주세요.</span>';
+  }
+}
+
+async function loadRecHistory() {
+  try {
+    const r = await fetch('/api/recommend/history');
+    const d = await r.json();
+    const el = document.getElementById('recHistory');
+    if (!d.history || !d.history.length) {
+      el.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">추천 실행 후 기록이 표시됩니다</p>';
+      return;
+    }
+    el.innerHTML = '<div class="space-y-2">' + d.history.map(function(h) {
+      const typeLabel = h.type === 'short' ? '단기' : '장기';
+      const typeColor = h.type === 'short' ? '#f59e0b' : '#10b981';
+      return '<div class="flex items-center gap-3 text-xs p-2 rounded-lg" style="background:#0d111e;">' +
+        '<span class="px-2 py-0.5 rounded font-semibold" style="background:' + typeColor + '22;color:' + typeColor + ';">' + typeLabel + '</span>' +
+        '<span class="text-white">' + (h.top1_name || h.top1_symbol || '-') + '</span>' +
+        '<span class="text-gray-500">외 여러 종목</span>' +
+        '<span class="text-gray-600 ml-auto">' + (h.created_at || '').slice(0,16) + '</span>' +
+      '</div>';
+    }).join('') + '</div>';
+  } catch(e) {}
 }
 
 // 초기 로드
