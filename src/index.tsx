@@ -640,8 +640,10 @@ function mainPageHTML(): string {
     <div class="flex flex-wrap items-center gap-2">
       <select id="recMarket" class="text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white">
         <option value="all">전체 (국내+미국)</option>
-        <option value="korea">국내만 (KOSPI)</option>
-        <option value="us">미국만 (S&P500)</option>
+        <option value="korea">국내 KOSPI</option>
+        <option value="kosdaq">국내 KOSDAQ</option>
+        <option value="korea_all">국내 전체 (KOSPI+KOSDAQ)</option>
+        <option value="us">미국 (S&P500+NASDAQ)</option>
       </select>
       <button onclick="loadRecommend('short')" id="btnShort"
         class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"
@@ -1767,7 +1769,7 @@ async function loadRecommend(type) {
     elSummary.innerHTML =
       '<span class="px-2 py-1 rounded bg-gray-800">' + d.scanned + '개 종목 분석</span>' +
       '<span class="px-2 py-1 rounded bg-gray-800">' + d.count + '개 추천</span>' +
-      '<span class="px-2 py-1 rounded bg-gray-800">시장: ' + { all:'전체', korea:'국내', us:'미국' }[market] + '</span>' +
+      '<span class="px-2 py-1 rounded bg-gray-800">시장: ' + ({ all:'전체', korea:'KOSPI', kosdaq:'KOSDAQ', korea_all:'국내전체', us:'미국' }[market] || market) + '</span>' +
       '<span class="px-2 py-1 rounded bg-gray-800">업데이트: ' + new Date(d.updatedAt).toLocaleTimeString('ko-KR') + '</span>';
 
     // 종목 카드 렌더링

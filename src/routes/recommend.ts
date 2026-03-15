@@ -5,6 +5,17 @@ import {
   type StockAnalysis,
 } from '../lib/screener'
 
+// ─── 시장 필터 헬퍼 ───────────────────────────────────────────────────────────
+function filterPool(market: string) {
+  switch (market) {
+    case 'korea':     return [...STOCK_UNIVERSE.korea_large, ...STOCK_UNIVERSE.korea_growth]
+    case 'kosdaq':    return STOCK_UNIVERSE.korea_kosdaq
+    case 'korea_all': return [...STOCK_UNIVERSE.korea_large, ...STOCK_UNIVERSE.korea_growth, ...STOCK_UNIVERSE.korea_kosdaq]
+    case 'us':        return STOCK_UNIVERSE.us_large
+    default:          return ALL_STOCKS
+  }
+}
+
 type Bindings = { DB: D1Database }
 const recommend = new Hono<{ Bindings: Bindings }>()
 
@@ -29,10 +40,7 @@ recommend.get('/short', async (c) => {
   const market = c.req.query('market') || 'all'  // all | korea | us
   const limit  = Math.min(parseInt(c.req.query('limit') || '10'), 20)
 
-  // 분석 대상 종목 선택
-  let pool = ALL_STOCKS
-  if (market === 'korea') pool = [...STOCK_UNIVERSE.korea_large, ...STOCK_UNIVERSE.korea_growth]
-  if (market === 'us')    pool = STOCK_UNIVERSE.us_large
+  const pool = filterPool(market)
 
   try {
     const allResults = await screenStocks(pool, 5)
@@ -83,9 +91,7 @@ recommend.get('/long', async (c) => {
   const market = c.req.query('market') || 'all'
   const limit  = Math.min(parseInt(c.req.query('limit') || '10'), 20)
 
-  let pool = ALL_STOCKS
-  if (market === 'korea') pool = [...STOCK_UNIVERSE.korea_large, ...STOCK_UNIVERSE.korea_growth]
-  if (market === 'us')    pool = STOCK_UNIVERSE.us_large
+  const pool = filterPool(market)
 
   try {
     const allResults = await screenStocks(pool, 5)
